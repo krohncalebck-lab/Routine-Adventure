@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MBS Tracker — Mobile</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    :root{
+      --bg:#0b1324; --fg:#e5e7eb; --muted:#94a3b8; --card:#111827; --border:#1f2937; --accent:#22c55e; --primary:#3b82f6;
+      --touch:56px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Ubuntu,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+    .app{max-width:720px;margin:0 auto;padding:12px 12px calc(env(safe-area-inset-bottom) + 76px);}
+    header{position:sticky;top:0;z-index:10;background:linear-gradient(to bottom, rgba(11,19,36,.95), rgba(11,19,36,.85));backdrop-filter:blur(6px);padding:10px 12px;border-bottom:1px solid var(--border)}
+    h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}
+    .row{display:flex;gap:10px;align-items:center}
+    .right{margin-left:auto}
+    .btn{height:var(--touch);min-width:var(--touch);padding:0 14px;border-radius:12px;border:1px solid var(--border);background:#0f172a;color:var(--fg);font-weight:600}
+    .btn.primary{background:var(--primary);border-color:transparent;color:white}
+    .btn.ghost{background:transparent}
+    .icon{font-size:20px;line-height:1}
+    .seg{display:flex;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .seg button{flex:1;border:0;background:#0f172a;color:var(--muted);height:40px}
+    .seg button.active{background:#1f2937;color:var(--fg)}
+    .input{width:100%;height:44px;border-radius:10px;border:1px solid var(--border);background:#0f172a;color:var(--fg);padding:0 12px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;margin-top:12px}
+    .muted{color:var(--muted);font-size:12px}
+    .progress{height:10px;width:100%;border-radius:999px;background:#1f2937;overflow:hidden}
+    .bar{height:100%;background:var(--accent);width:0}
+    .section{margin-top:12px}
+    .section header{display:flex;align-items:center;gap:10px;background:transparent;border:0;padding:0;margin:0}
+    .section h2{font-size:16px;margin:0;flex:1}
+    .chev{transform:rotate(0deg);transition:transform .2s ease}
+    .collapsed .chev{transform:rotate(-90deg)}
+    .list{margin-top:8px}
+    .habit{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1f2937}
+    .habit:last-child{border-bottom:0}
+    .pill{font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:4px 8px}
+    .big3{display:grid;gap:8px;margin-top:8px}
+    .big3Item{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;background:#0f172a}
+    textarea{width:100%;min-height:120px;border:1px solid var(--border);border-radius:12px;background:#0f172a;color:var(--fg);padding:10px}
+    /* Docked action bar */
+    .dock{position:fixed;left:0;right:0;bottom:0;z-index:15;padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);background:linear-gradient(to top, rgba(11,19,36,.98), rgba(11,19,36,.6));backdrop-filter:blur(8px);border-top:1px solid var(--border)}
+    .dock .row{gap:8px}
+    .dock .btn{flex:1;height:52px}
+    @media (min-width:640px){.dock .btn{height:48px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <h1>MBS Tracker</h1>
+      <div class="right row">
+        <button id="exportBtn" class="btn ghost" title="Export">⬇︎</button>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+        <button id="importBtn" class="btn ghost" title="Import">⬆︎</button>
+        <button id="printBtn" class="btn ghost" title="Print">🖨️</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app" id="app"></main>
+
+  <div class="dock">
+    <div class="row">
+      <input id="dateInput" class="input" type="date" aria-label="Select date" />
+      <button id="todayBtn" class="btn primary">Today</button>
+    </div>
+  </div>
+
+  <script>
+    // PWA bootstrap
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js').catch(console.error));
+    }
+
+    // ===== Utilities & Storage =====
+    const storageKey = 'mbs-tracker-mobile-v1';
+    const fmt = (d) => { const z = (n)=>String(n).padStart(2,'0'); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate()); };
+    const addDays = (dateStr, delta) => { const d = new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()+delta); return fmt(d); };
+    const daysBetween = (a,b) => { const d1=new Date(a+'T00:00:00'); const d2=new Date(b+'T00:00:00'); return Math.round((d2-d1)/86400000); };
+
+    const defaultHabits = Object.freeze({
+      'Physical': [
+        { id:'core', name:'Core: plank/side plank/leg raises' },
+        { id:'cardio', name:'Cardio: jump rope or HIIT (skater jumps/burpees)' },
+        { id:'skate', name:'Skate session: warm-up → skills → mobility' },
+      ],
+      'Spiritual': [
+        { id:'scripture', name:'Read Scripture (Gospels or Psalms)' },
+        { id:'prayerJournal', name:'Prayer & short journal' },
+        { id:'midday', name:'Midday breath prayer (5 min)' },
+        { id:'gratitude', name:'Evening gratitude (3)' },
+      ],
+      'Mind/Emotion': [
+        { id:'checkin', name:'Morning check-in: body scan + name the feeling' },
+        { id:'nsReg', name:'Nervous system regulation (breath/hum/cold/ground)' },
+        { id:'journal', name:'Evening journaling (story work)' },
+        { id:'deepStory', name:'Deep story session (1×/week)' },
+      ],
+      'Pouchlingz': [
+        { id:'maker', name:'Maker time (30–60 min design/build)' },
+        { id:'community', name:'Community: post/comment engagement' },
+        { id:'email', name:'Email list: capture or progress' },
+        { id:'outreach', name:'Outreach: toy blog/YouTuber (2×/week)' },
+      ],
+    });
+
+    const buildDefaultData = () => {
+      const d=new Date(); d.setMonth(d.getMonth()+6);
+      return { settings:{ habits: JSON.parse(JSON.stringify(defaultHabits)), kickstarterTargetDate: fmt(d) }, days:{} };
+    };
+
+    const ls = {
+      load(){
+        try{ const raw = localStorage.getItem(storageKey); return raw? JSON.parse(raw) : buildDefaultData(); }catch(e){ return buildDefaultData(); }
+      },
+      save(obj){ try{ localStorage.setItem(storageKey, JSON.stringify(obj)); }catch(e){} }
+    };
+
+    // ===== State =====
+    let data = ls.load();
+    let dateStr = fmt(new Date());
+
+    // ===== Helpers =====
+    const el = (s)=>document.querySelector(s);
+    const app = el('#app');
+    const escapeHtml = (s)=> String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+    function ensureDay(dStr){
+      if(!data.days[dStr]){
+        data.days[dStr] = { completed:{}, notes:'', big3:['','',''], big3Done:[false,false,false] };
+        ls.save(data);
+      }
+    }
+
+    function categoryTotals(cat, dayRec){
+      const ids = (data.settings.habits[cat]||[]).map(h=>h.id);
+      const total = ids.length;
+      const done = ids.reduce((acc,id)=>acc + (dayRec.completed[id]?1:0),0);
+      const percent = total? Math.round((done/total)*100) : 0;
+      return {done,total,percent};
+    }
+
+    function grandTotals(dayRec){
+      const cats = Object.keys(data.settings.habits);
+      let done=0,total=0; cats.forEach(c=>{const t=categoryTotals(c,dayRec); done+=t.done; total+=t.total;});
+      return {done,total,percent: total? Math.round((done/total)*100):0};
+    }
+
+    function computeStreak(habitId, startDate){
+      let s=0; let d=startDate;
+      while(data.days[d]?.completed?.[habitId]){ s++; d=addDays(d,-1); }
+      return s;
+    }
+
+    function toggleSection(container){
+      container.classList.toggle('collapsed');
+      const list = container.querySelector('.list');
+      if(list) list.style.display = container.classList.contains('collapsed') ? 'none' : '';
+    }
+
+    function render(){
+      ensureDay(dateStr);
+      const day = data.days[dateStr];
+      const cats = Object.keys(data.settings.habits);
+      const grand = grandTotals(day);
+      const daysToTarget = Math.max(0, daysBetween(fmt(new Date()), data.settings.kickstarterTargetDate||fmt(new Date())));
+
+      app.innerHTML = `
+        <div class="card">
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-weight:800">Daily Progress</div>
+              <div class="muted">${grand.done}/${grand.total} done</div>
+            </div>
+            <div class="pill">${daysToTarget}d to launch</div>
+          </div>
+          <div class="progress" style="margin-top:10px"><div class="bar" style="width:${grand.percent}%"></div></div>
+          <div class="row" style="margin-top:10px">
+            <label class="muted">Target <input id="targetDate" type="date" class="input"></label>
+          </div>
+        </div>
+
+        <div class="card section" id="sec-big3">
+          <header class="row" onclick="">
+            <div class="chev">▾</div><h2>Big 3 (Today)</h2>
+          </header>
+          <div class="big3 list">
+            ${[0,1,2].map(i=>`
+              <div class="big3Item">
+                <input type="checkbox" data-action="toggleBig3" data-index="${i}" ${day.big3Done[i]?'checked':''}/>
+                <input type="text" class="input grow" data-action="setBig3" data-index="${i}" placeholder="Big ${i+1}" value="${escapeHtml(day.big3[i]||'')}"/>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        ${cats.map(cat=>{
+          const totals = categoryTotals(cat, day);
+          return `
+            <div class="card section" data-cat="${cat}">
+              <header class="row">
+                <div class="chev">▾</div><h2>${cat}</h2>
+                <span class="pill">${totals.done}/${totals.total}</span>
+                <div class="right row">
+                  <button class="btn" data-action="markAll" data-value="1" data-cat="${cat}">All</button>
+                  <button class="btn" data-action="markAll" data-value="0" data-cat="${cat}">Clear</button>
+                </div>
+              </header>
+              <div class="list">
+                ${(data.settings.habits[cat]||[]).map(h=>`
+                  <label class="habit">
+                    <input type="checkbox" data-action="toggleHabit" data-id="${h.id}" ${day.completed[h.id]?'checked':''} />
+                    <div class="grow">${escapeHtml(h.name)}</div>
+                    <span class="muted">🔥 ${computeStreak(h.id,dateStr)}d</span>
+                    <button class="btn" data-action="removeHabit" data-id="${h.id}" data-cat="${cat}">–</button>
+                  </label>
+                `).join('')}
+                <div class="row" style="margin-top:8px">
+                  <input type="text" class="input grow" placeholder="New habit…" data-action="newHabitText" data-cat="${cat}" />
+                  <button class="btn" data-action="addHabit" data-cat="${cat}">+</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+
+        <div class="card section">
+          <header class="row"><div class="chev">▾</div><h2>Notes</h2></header>
+          <div class="list"><textarea id="notes" placeholder="Reflection, prayer, insights, wins…">${escapeHtml(day.notes||'')}</textarea></div>
+        </div>
+      `;
+
+      // Init date inputs
+      const di = el('#dateInput'); if(di) di.value = dateStr;
+      const td = el('#targetDate'); if(td) td.value = data.settings.kickstarterTargetDate;
+
+      // Collapsible sections
+      document.querySelectorAll('.section > header').forEach(h => {
+        h.addEventListener('click', (ev) => {
+          // prevent clicks on buttons inside header from toggling
+          if (ev.target.closest('button')) return;
+          toggleSection(h.parentElement);
+        });
+      });
+    }
+
+    // Events
+    document.addEventListener('click', (e)=>{
+      const t = e.target;
+      if(t.id==='todayBtn'){ dateStr = fmt(new Date()); render(); return; }
+      if(t.id==='printBtn'){ window.print(); return; }
+      if(t.id==='exportBtn'){ doExport(); return; }
+      if(t.id==='importBtn'){ el('#importFile').click(); return; }
+
+      const action = t.getAttribute('data-action');
+      if(!action) return;
+
+      if(action==='toggleHabit'){
+        const id = t.getAttribute('data-id');
+        data.days[dateStr].completed[id] = !data.days[dateStr].completed[id];
+        ls.save(data); render();
+      }
+      if(action==='markAll'){
+        const cat = t.getAttribute('data-cat');
+        const value = t.getAttribute('data-value')==='1';
+        const ids = (data.settings.habits[cat]||[]).map(h=>h.id);
+        ids.forEach(id=> data.days[dateStr].completed[id] = value);
+        ls.save(data); render();
+      }
+      if(action==='addHabit'){
+        const cat = t.getAttribute('data-cat');
+        const input = document.querySelector(`input[data-action="newHabitText"][data-cat="${CSS.escape(cat)}"]`);
+        const name = (input?.value||'').trim();
+        if(!name) return;
+        const id = name.toLowerCase().replace(/[^a-z0-9]+/g,'-') + '-' + Math.random().toString(36).slice(2,6);
+        data.settings.habits[cat] = [...(data.settings.habits[cat]||[]), {id,name}];
+        input.value = '';
+        ls.save(data); render();
+      }
+      if(action==='removeHabit'){
+        const cat = t.getAttribute('data-cat');
+        const id = t.getAttribute('data-id');
+        data.settings.habits[cat] = (data.settings.habits[cat]||[]).filter(h=>h.id!==id);
+        Object.keys(data.days).forEach(d=>{ const rec=data.days[d]; if(rec.completed && id in rec.completed){ delete rec.completed[id]; }});
+        ls.save(data); render();
+      }
+      if(action==='toggleBig3'){
+        const i = +t.getAttribute('data-index');
+        data.days[dateStr].big3Done[i] = !data.days[dateStr].big3Done[i];
+        ls.save(data); render();
+      }
+    });
+
+    document.addEventListener('input', (e)=>{
+      const t = e.target;
+      if(t.id==='dateInput'){ dateStr = t.value || fmt(new Date()); render(); }
+      if(t.id==='notes'){ data.days[dateStr].notes = t.value; ls.save(data); }
+      if(t.id==='targetDate'){ data.settings.kickstarterTargetDate = t.value || data.settings.kickstarterTargetDate; ls.save(data); render(); }
+      if(t.getAttribute('data-action')==='setBig3'){ const i = +t.getAttribute('data-index'); data.days[dateStr].big3[i] = t.value; ls.save(data); }
+    });
+
+    // Import / Export
+    function doExport(){
+      try{
+        const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'mind-body-spirit-tracker.json'; a.click();
+        URL.revokeObjectURL(url);
+      }catch(e){ alert('Export failed.'); }
+    }
+    document.getElementById('importFile').addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0]; if(!f) return;
+      const fr = new FileReader();
+      fr.onload = () => {
+        try{
+          const parsed = JSON.parse(String(fr.result||'{}'));
+          data = migrate(parsed);
+          ls.save(data);
+          alert('Import successful.');
+          render();
+        }catch{ alert('Import failed. Not a valid JSON export.'); }
+      };
+      fr.readAsText(f);
+      e.target.value = '';
+    });
+
+    function migrate(obj){
+      const base = buildDefaultData();
+      const out = { ...base, ...obj };
+      if(!out.settings) out.settings = base.settings;
+      if(!out.settings.habits) out.settings.habits = base.settings.habits;
+      if(!out.settings.kickstarterTargetDate) out.settings.kickstarterTargetDate = base.settings.kickstarterTargetDate;
+      if(!out.days) out.days = {};
+      return out;
+    }
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+      el('#dateInput').value = dateStr;
+      render();
+    });
+  </script>
+</body>
+</html>
